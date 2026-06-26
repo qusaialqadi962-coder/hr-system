@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: afaq-postgres
+    environment:
+      POSTGRES_DB: afaq
+      POSTGRES_USER: afaq
+      POSTGRES_PASSWORD: afaq123
+    ports:
+      - '5432:5432'
+    volumes:
+      - afaq_pg_data:/var/lib/postgresql/data
+
+volumes:
+  afaq_pg_data:
