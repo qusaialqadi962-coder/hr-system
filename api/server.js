@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import rateLimit from 'express-rate-limit';
 import { config } from './config.js';
 import { initDb } from './db/index.js';
 import { authMiddleware } from './auth/middleware.js';
@@ -13,8 +14,29 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const auth = authMiddleware(config.jwtSecret);
 
-app.use(cors());
+if (config.trustProxy) {
+  app.set('trust proxy', 1);
+}
+
+if (config.isProduction) {
+  if (config.corsOrigin) {
+    app.use(cors({ origin: config.corsOrigin, methods: ['GET', 'POST', 'PUT', 'DELETE'] }));
+  }
+} else {
+  app.use(cors());
+}
+
 app.use(express.json({ limit: '5mb' }));
+
+app.disable('x-powered-by');
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: config.isProduction ? 10 : 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'محاولات كثيرة — حاول بعد 15 دقيقة' },
+});
 
 app.get('/api/health', async (_req, res) => {
   try {
@@ -26,6 +48,7 @@ app.get('/api/health', async (_req, res) => {
       version: 2,
       service: 'afaq-hr-inventory-api',
       database: driver,
+      environment: config.nodeEnv,
       features: ['auth', 'sync', 'users', 'roles'],
     });
   } catch (e) {
@@ -38,6 +61,7 @@ app.get('/api/health', async (_req, res) => {
   }
 });
 
+app.use('/api/auth/login', loginLimiter);
 app.use('/api/auth', createAuthRouter());
 app.use('/api/sync', createSyncRouter(auth));
 app.use('/api/users', createUsersRouter(auth));
@@ -48,9 +72,13 @@ async function start() {
     await initDb();
     const driver = config.dbDriver === 'json' ? 'json' : config.dbDriver;
     app.listen(config.port, () => {
-      console.log(`Afaq API v2 running on http://localhost:${config.port}`);
-      console.log(`Database: ${driver} (auto-fallback to json if SQL unavailable)`);
-      console.log('Users: admin, hr, warehouse, accountant, viewer — password: 1234');
+      console.log(`Afaq API v2 running on port ${config.port} (${config.nodeEnv})`);
+      console.log(`Database driver: ${driver}`);
+      if (!config.isProduction) {
+        console.log('Dev users: admin, hr, warehouse, accountant, viewer — password: 1234');
+      } else {
+        console.log('Production mode — change default passwords after first login');
+      }
     });
   } catch (e) {
     console.error('Failed to start API:', e.message || e);
@@ -58,8 +86,7 @@ async function start() {
       console.error('');
       console.error('PostgreSQL is required. Options:');
       console.error('  1) docker compose up -d   (inside api folder)');
-      console.error('  2) Install PostgreSQL and set DATABASE_URL in api/.env');
-      console.error(`  Current DATABASE_URL: ${config.databaseUrl}`);
+      console.error('  2) Set DATABASE_URL in environment variables');
     }
     if (config.dbDriver === 'mssql') {
       console.error('');

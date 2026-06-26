@@ -1,13 +1,17 @@
-import jwt from 'jsonwebtoken';
 import { canWrite } from './roles.js';
+import { resolveAuthUser } from './session.js';
 
 export function authMiddleware(jwtSecret) {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     const header = req.headers.authorization || '';
     const token = header.startsWith('Bearer ') ? header.slice(7) : '';
     if (!token) return res.status(401).json({ message: 'غير مصرح' });
     try {
-      req.user = jwt.verify(token, jwtSecret);
+      const user = await resolveAuthUser(token, jwtSecret);
+      if (!user) {
+        return res.status(401).json({ message: 'انتهت الجلسة — سجّل الدخول مجدداً' });
+      }
+      req.user = user;
       next();
     } catch {
       return res.status(401).json({ message: 'انتهت الجلسة — سجّل الدخول مجدداً' });

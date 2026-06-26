@@ -24,6 +24,9 @@ export async function initDb() {
     await repo.init();
     return repo;
   } catch (e) {
+    if (config.isProduction) {
+      throw new Error(`Database unavailable in production (${e.message})`);
+    }
     console.warn(`[db] ${driver} unavailable (${e.message}) — using JSON storage`);
     repo = await loadDriver('json');
     await repo.init();

@@ -80,3 +80,12 @@ CREATE TABLE IF NOT EXISTS moves (
 CREATE INDEX IF NOT EXISTS idx_htrans_emp ON htrans(emp_id);
 CREATE INDEX IF NOT EXISTS idx_vacations_emp ON vacations(emp_id);
 CREATE INDEX IF NOT EXISTS idx_moves_prod ON moves(prod_id);
+
+CREATE TABLE IF NOT EXISTS quotes (
+  quote_number INT PRIMARY KEY,
+  data JSONB NOT NULL DEFAULT '{}'::jsonb,
+  saved_at TIMESTAMPTZ,
+  saved_by VARCHAR(50) NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_quotes_saved_at ON quotes(saved_at DESC);

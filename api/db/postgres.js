@@ -25,7 +25,7 @@ async function runSchema() {
 }
 
 async function loadRows() {
-  const [company, seq, settings, employees, htrans, vacations, products, moves] =
+  const [company, seq, settings, employees, htrans, vacations, products, moves, quotes] =
     await Promise.all([
       query('SELECT * FROM company WHERE id=1'),
       query('SELECT * FROM app_seq WHERE id=1'),
@@ -35,6 +35,7 @@ async function loadRows() {
       query('SELECT * FROM vacations ORDER BY id'),
       query('SELECT * FROM products ORDER BY id'),
       query('SELECT * FROM moves ORDER BY id'),
+      query('SELECT * FROM quotes ORDER BY quote_number DESC'),
     ]);
 
   const rawTerms = settings.rows[0]?.quote_default_terms;
@@ -52,6 +53,7 @@ async function loadRows() {
     vacations: vacations.rows,
     products: products.rows,
     moves: moves.rows,
+    quotes: quotes.rows,
   });
 }
 

@@ -100,3 +100,11 @@ CREATE INDEX idx_vacations_emp ON vacations(emp_id);
 
 IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_moves_prod')
 CREATE INDEX idx_moves_prod ON moves(prod_id);
+
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'quotes')
+CREATE TABLE quotes (
+  quote_number INT NOT NULL PRIMARY KEY,
+  data NVARCHAR(MAX) NOT NULL DEFAULT '{}',
+  saved_at DATETIME2 NULL,
+  saved_by NVARCHAR(50) NOT NULL DEFAULT ''
+);

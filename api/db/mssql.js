@@ -37,10 +37,20 @@ async function run(sqlText) {
   return p.request().query(sqlText);
 }
 
+async function runParams(sqlText, bind) {
+  const p = await getPool();
+  const req = p.request();
+  for (const [name, type, value] of bind) {
+    req.input(name, type, value);
+  }
+  return req.query(sqlText);
+}
+
 async function persistDbMssql(transaction, db) {
   const req = () => new sql.Request(transaction);
 
   await req().query('DELETE FROM moves');
+  await req().query('DELETE FROM quotes');
   await req().query('DELETE FROM htrans');
   await req().query('DELETE FROM vacations');
   await req().query('DELETE FROM employees');
@@ -111,6 +121,18 @@ async function persistDbMssql(transaction, db) {
       );
   }
 
+  for (const q of db.quotes || []) {
+    if (q == null || q.number == null) continue;
+    await req()
+      .input('quote_number', sql.Int, Number(q.number))
+      .input('data', sql.NVarChar(sql.MAX), JSON.stringify(q))
+      .input('saved_at', sql.DateTime2, q.savedAt ? new Date(q.savedAt) : null)
+      .input('saved_by', sql.NVarChar(50), q.savedBy || '')
+      .query(
+        'INSERT INTO quotes (quote_number, data, saved_at, saved_by) VALUES (@quote_number,@data,@saved_at,@saved_by)'
+      );
+  }
+
   const c = db.company || {};
   await req()
     .input('name', sql.NVarChar(200), c.name || '')
@@ -146,7 +168,7 @@ async function persistDbMssql(transaction, db) {
 }
 
 async function loadRows() {
-  const [company, seq, settings, employees, htrans, vacations, products, moves] =
+  const [company, seq, settings, employees, htrans, vacations, products, moves, quotes] =
     await Promise.all([
       run('SELECT * FROM company WHERE id=1'),
       run('SELECT * FROM app_seq WHERE id=1'),
@@ -156,6 +178,7 @@ async function loadRows() {
       run('SELECT * FROM vacations ORDER BY id'),
       run('SELECT * FROM products ORDER BY id'),
       run('SELECT * FROM moves ORDER BY id'),
+      run('SELECT * FROM quotes ORDER BY quote_number DESC'),
     ]);
 
   const settingsRow = settings.recordset[0];
@@ -177,6 +200,7 @@ async function loadRows() {
     vacations: vacations.recordset,
     products: products.recordset,
     moves: moves.recordset,
+    quotes: quotes.recordset,
   });
 }
 
@@ -186,8 +210,15 @@ async function seedUsersMssql() {
 
   for (const u of DEFAULT_USERS) {
     const hash = bcrypt.hashSync(u.password, 10);
-    await run(`INSERT INTO users (username, password_hash, display_name, role, active)
-      VALUES ('${u.username.replace(/'/g, "''")}', '${hash}', '${u.displayName.replace(/'/g, "''")}', '${u.role}', 1)`);
+    await runParams(
+      'INSERT INTO users (username, password_hash, display_name, role, active) VALUES (@username,@hash,@displayName,@role,1)',
+      [
+        ['username', sql.NVarChar(50), u.username],
+        ['hash', sql.NVarChar(255), hash],
+        ['displayName', sql.NVarChar(100), u.displayName],
+        ['role', sql.NVarChar(30), u.role],
+      ]
+    );
   }
 }
 
@@ -257,8 +288,9 @@ export async function saveAll(db) {
 }
 
 export async function findUserByUsername(username) {
-  const result = await run(
-    `SELECT id, username, password_hash, display_name, role, active FROM users WHERE username='${username.replace(/'/g, "''")}'`
+  const result = await runParams(
+    'SELECT id, username, password_hash, display_name, role, active FROM users WHERE username=@username',
+    [['username', sql.NVarChar(50), username]]
   );
   return result.recordset[0] || null;
 }
@@ -291,9 +323,17 @@ export async function listUsers() {
 
 export async function createUser({ username, password, displayName, role }) {
   const hash = bcrypt.hashSync(password, 10);
-  const result = await run(`INSERT INTO users (username, password_hash, display_name, role, active)
-    OUTPUT INSERTED.id, INSERTED.username, INSERTED.display_name, INSERTED.role, INSERTED.active, INSERTED.created_at
-    VALUES ('${username.replace(/'/g, "''")}', '${hash}', '${(displayName || username).replace(/'/g, "''")}', '${role || 'viewer'}', 1)`);
+  const result = await runParams(
+    `INSERT INTO users (username, password_hash, display_name, role, active)
+     OUTPUT INSERTED.id, INSERTED.username, INSERTED.display_name, INSERTED.role, INSERTED.active, INSERTED.created_at
+     VALUES (@username,@hash,@displayName,@role,1)`,
+    [
+      ['username', sql.NVarChar(50), username],
+      ['hash', sql.NVarChar(255), hash],
+      ['displayName', sql.NVarChar(100), displayName || username],
+      ['role', sql.NVarChar(30), role || 'viewer'],
+    ]
+  );
   const u = result.recordset[0];
   return {
     id: u.id,
@@ -306,15 +346,32 @@ export async function createUser({ username, password, displayName, role }) {
 }
 
 export async function updateUser(id, { displayName, role, active, password }) {
+  const bind = [];
   const sets = [];
-  if (displayName != null) sets.push(`display_name='${String(displayName).replace(/'/g, "''")}'`);
-  if (role != null) sets.push(`role='${String(role).replace(/'/g, "''")}'`);
-  if (active != null) sets.push(`active=${active ? 1 : 0}`);
-  if (password) sets.push(`password_hash='${bcrypt.hashSync(password, 10)}'`);
+  if (displayName != null) {
+    sets.push('display_name=@displayName');
+    bind.push(['displayName', sql.NVarChar(100), displayName]);
+  }
+  if (role != null) {
+    sets.push('role=@role');
+    bind.push(['role', sql.NVarChar(30), role]);
+  }
+  if (active != null) {
+    sets.push('active=@active');
+    bind.push(['active', sql.Bit, active ? 1 : 0]);
+  }
+  if (password) {
+    sets.push('password_hash=@hash');
+    bind.push(['hash', sql.NVarChar(255), bcrypt.hashSync(password, 10)]);
+  }
   if (!sets.length) return null;
 
-  const result = await run(`UPDATE users SET ${sets.join(', ')} WHERE id=${Number(id)};
-    SELECT id, username, display_name, role, active, created_at FROM users WHERE id=${Number(id)}`);
+  bind.push(['id', sql.Int, Number(id)]);
+  const result = await runParams(
+    `UPDATE users SET ${sets.join(', ')} WHERE id=@id;
+     SELECT id, username, display_name, role, active, created_at FROM users WHERE id=@id`,
+    bind
+  );
   const u = result.recordset[0];
   if (!u) return null;
   return {

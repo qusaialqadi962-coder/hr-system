@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
 import { getRepo } from '../db/index.js';
 import { getPermissions, ROLE_LABELS } from '../auth/roles.js';
+import { resolveAuthUser } from '../auth/session.js';
 
 export function createAuthRouter() {
   const router = express.Router();
@@ -47,16 +48,17 @@ export function createAuthRouter() {
     const token = header.startsWith('Bearer ') ? header.slice(7) : '';
     if (!token) return res.status(401).json({ message: 'غير مصرح' });
     try {
-      const payload = jwt.verify(token, config.jwtSecret);
+      const user = await resolveAuthUser(token, config.jwtSecret);
+      if (!user) return res.status(401).json({ message: 'انتهت الجلسة' });
       res.json({
-        username: payload.username,
-        displayName: payload.displayName,
-        role: payload.role,
-        roleLabel: ROLE_LABELS[payload.role] || payload.role,
-        permissions: getPermissions(payload.role),
+        username: user.username,
+        displayName: user.displayName,
+        role: user.role,
+        roleLabel: ROLE_LABELS[user.role] || user.role,
+        permissions: getPermissions(user.role),
       });
     } catch {
-      res.status(401).json({ message: 'انتهت الجلسة' });
+      return res.status(401).json({ message: 'انتهت الجلسة' });
     }
   });
 

@@ -16,6 +16,7 @@ export function mapDbFromRows({
   vacations,
   products,
   moves,
+  quotes = [],
 }) {
   return {
     company: {
@@ -76,6 +77,15 @@ export function mapDbFromRows({
       qty: Number(m.qty),
       desc: m.desc_text || m.desc || '',
     })),
+    quotes: quotes.map((q) => {
+      const raw = q.data ?? q.payload;
+      if (!raw) return null;
+      try {
+        return typeof raw === 'string' ? JSON.parse(raw) : raw;
+      } catch {
+        return null;
+      }
+    }).filter(Boolean),
   };
 }
 
@@ -83,6 +93,7 @@ export async function persistDb(client, db, exec) {
   const run = exec || ((sql, params) => client.query(sql, params));
 
   await run('DELETE FROM moves');
+  await run('DELETE FROM quotes');
   await run('DELETE FROM htrans');
   await run('DELETE FROM vacations');
   await run('DELETE FROM employees');
@@ -129,6 +140,19 @@ export async function persistDb(client, db, exec) {
     await run(
       'INSERT INTO moves (id, prod_id, date, type, qty, desc_text) VALUES ($1,$2,$3,$4,$5,$6)',
       [m.id, m.prodId, m.date || null, m.type, m.qty || 0, m.desc || '']
+    );
+  }
+
+  for (const q of db.quotes || []) {
+    if (q == null || q.number == null) continue;
+    await run(
+      'INSERT INTO quotes (quote_number, data, saved_at, saved_by) VALUES ($1,$2::jsonb,$3,$4) ON CONFLICT (quote_number) DO UPDATE SET data=EXCLUDED.data, saved_at=EXCLUDED.saved_at, saved_by=EXCLUDED.saved_by',
+      [
+        Number(q.number),
+        JSON.stringify(q),
+        q.savedAt || null,
+        q.savedBy || '',
+      ]
     );
   }
 

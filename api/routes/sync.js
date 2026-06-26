@@ -1,6 +1,7 @@
 import express from 'express';
 import { getRepo } from '../db/index.js';
 import { mergeDbByRole, hasAnyWrite } from '../auth/roles.js';
+import { sanitizeDb } from '../lib/validateDb.js';
 
 export function createSyncRouter(auth) {
   const router = express.Router();
@@ -29,9 +30,8 @@ export function createSyncRouter(auth) {
       const repo = await getRepo();
       const current = await repo.loadAll();
       const merged = mergeDbByRole(current, incoming, req.user.role);
-      const saved = repo.saveAllForRole
-        ? await repo.saveAllForRole(incoming, req.user.role)
-        : await repo.saveAll(merged);
+      const { db: cleaned } = sanitizeDb(merged);
+      const saved = await repo.saveAll(cleaned);
       res.json(saved);
     } catch (e) {
       res.status(400).json({ message: e.message || 'فشل الحفظ' });
